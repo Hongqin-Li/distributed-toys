@@ -154,7 +154,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 _ => {
                                     panic!("reduce {:?} error: {:?}", path, e);
                                 }
-                            }
+                            },
                         }
                     }
                     let mut result: Vec<(String, String)> = Vec::new();
