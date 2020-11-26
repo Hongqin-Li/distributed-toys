@@ -1,9 +1,14 @@
+#![feature(map_first_last)]
+
 use futures::{future, prelude::*};
+use log::{info, trace};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::time::SystemTime;
+use std::{collections::BTreeMap, process};
+use tokio::time::sleep;
 
 use map_reduce::{ReportReply, RequestReply, Service};
 
@@ -26,7 +31,7 @@ struct ServerContext {
     state: TaskType,
 
     idle: Vec<Task>,
-    inprogress: Vec<Task>,
+    inprogress: BTreeMap<usize, Task>,
     completed: Vec<Task>,
 }
 
@@ -40,34 +45,22 @@ struct MapReduceServer {
 
 #[tarpc::server]
 impl Service for MapReduceServer {
-    async fn hello(self, _: context::Context, name: String) -> String {
-        format!(
-            "Hello, {}! You are connected from {:?} with files {:?}",
-            name,
-            self.addr,
-            self.context.clone().lock().unwrap().files
-        )
-    }
     async fn request(self, _: context::Context) -> RequestReply {
         let ctx = self.context.clone();
         let mut c = ctx.lock().unwrap();
-        println!("idle {:#?}", c.idle);
-        println!("inprogress {:#?}", c.inprogress);
-        println!("completed {:#?}", c.completed);
+        let timeout = c.timeout;
 
         let task = {
             if let Some(mut t) = c.idle.pop() {
                 t.created_at = SystemTime::now();
-                c.inprogress.push(t.clone());
+                c.inprogress.insert(t.id, t.clone());
                 Some(t)
-            } else if let Some(t) = c.inprogress.last() {
-                // TODO: pop front?
-                if let Ok(dt) = SystemTime::now().duration_since(t.created_at) {
-                    if dt > c.timeout {
-                        println!("Task {:?} timeout, reassigned to other workers.", t);
-                        let mut tt = t.clone();
-                        tt.created_at = SystemTime::now();
-                        Some(tt)
+            } else if let Some(mut t) = c.inprogress.first_entry() {
+                if let Ok(dt) = SystemTime::now().duration_since(t.get().created_at) {
+                    if dt > timeout {
+                        println!("Task timeout, reassigned to other workers: {:?}", t);
+                        t.get_mut().created_at = SystemTime::now();
+                        Some(t.get().clone())
                     } else {
                         None
                     }
@@ -79,9 +72,11 @@ impl Service for MapReduceServer {
                 match c.state {
                     TaskType::Map => {
                         c.state = TaskType::Reduce;
+                        let nmap = c.nmap;
                         // Init reduce tasks
                         for i in 0..c.nreduce {
                             c.idle.push(Task {
+                                // Map tasks are [0, nmap), reduce tasks are [nmap, nmap + nreduce)
                                 id: i,
                                 files: Vec::new(),
                                 task: TaskType::Reduce,
@@ -89,10 +84,14 @@ impl Service for MapReduceServer {
                             });
                         }
                         let t = c.idle.pop().expect("--nreduce should be non-zero");
-                        c.inprogress.push(t.clone());
+                        c.inprogress.insert(t.id, t.clone());
                         Some(t)
                     }
                     TaskType::Reduce => None,
+                    TaskType::Exit => {
+                        info!("exiting");
+                        process::exit(0);
+                    }
                 }
             }
         };
@@ -103,21 +102,21 @@ impl Service for MapReduceServer {
             nreduce: c.nreduce,
         }
     }
-    async fn report(self, _: context::Context, id: usize) -> ReportReply {
+    async fn report(self, _: context::Context, id: usize, task: TaskType) -> ReportReply {
         let ctx = self.context.clone();
         let mut c = ctx.lock().unwrap();
-
-        let mut resp = None;
-        for (i, t) in c.inprogress.iter().enumerate() {
-            if t.id == id {
-                c.inprogress.remove(i);
-                resp = Some(ReportReply { done: true });
-                break;
+        if task == c.state {
+            if let Some(t) = c.inprogress.remove(&id) {
+                c.completed.push(t);
+                if TaskType::Reduce == c.state && c.idle.len() == 0 && c.inprogress.len() == 0 {
+                    c.state = TaskType::Exit;
+                }
+                ReportReply { done: true }
+            } else {
+                ReportReply { done: false }
             }
-        }
-        match resp {
-            Some(t) => t,
-            None => ReportReply { done: false },
+        } else {
+            ReportReply { done: false }
         }
     }
 }
@@ -162,8 +161,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             idle: {
                 let mut idle = Vec::new();
                 let chunk_size = (opt.files.len() + opt.nmap - 1) / opt.nmap;
+                trace!("chunk_size = {}", chunk_size);
                 assert!(chunk_size > 0, "input no file or --nmap is set as zero");
                 for (id, files) in opt.files.chunks(chunk_size).enumerate() {
+                    assert!(id < opt.nmap);
                     idle.push(Task {
                         task: TaskType::Map,
                         created_at: SystemTime::now(),
@@ -173,7 +174,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 idle
             },
-            inprogress: Vec::new(),
+            inprogress: BTreeMap::new(),
             completed: Vec::new(),
         })),
     };
@@ -185,8 +186,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Ignore accept errors.
         .filter_map(|r| future::ready(r.ok()))
         .map(server::BaseChannel::with_defaults)
-        // Limit channels to 1 per IP.
-        .max_channels_per_key(1, |t| t.as_ref().peer_addr().unwrap().ip())
+        // Limit channels to 10 per IP.
+        .max_channels_per_key(10, |t| t.as_ref().peer_addr().unwrap().ip())
         // serve is generated by the service attribute. It takes as input any type implementing
         // the generated Service trait.
         .map(|channel| channel.respond_with(server.clone().serve()).execute())

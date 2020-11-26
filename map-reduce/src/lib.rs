@@ -6,15 +6,14 @@ pub mod app;
 
 #[tarpc::service]
 pub trait Service {
-    /// Returns a greeting for name.
-    async fn hello(name: String) -> String;
     async fn request() -> RequestReply;
-    async fn report(id: usize) -> ReportReply;
+    async fn report(id: usize, task: TaskType) -> ReportReply;
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum TaskType {
     Map,
     Reduce,
+    Exit,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,9 +34,4 @@ pub struct RequestReply {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ReportReply {
     pub done: bool,
-}
-
-pub struct KeyValue {
-    key: String,
-    value: String,
 }
