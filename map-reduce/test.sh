@@ -27,7 +27,7 @@ done
 
 ${MASTER}
 
-pushd target
+cd target
 
 mrs_out=$(find ./ -name "mrs-*")
 for mrs in $mrs_out; do
@@ -40,7 +40,7 @@ for mrs in $mrs_out; do
   echo "- checked: $mr"
 done
 
-popd
+cd ..
 
 
 nfails=0
