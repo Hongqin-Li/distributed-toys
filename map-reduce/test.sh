@@ -8,7 +8,7 @@ nreduce=20
 
 echo $ntxt
 
-export RUST_LOG=sequential=trace,worker=trace,master=trace
+export RUST_LOG=map_reduce=trace
 SEQUENTIAL="./target/debug/sequential --nmap $ntxt --nreduce $nreduce $txt_dir/*.txt"
 MASTER="./target/debug/master --nmap $ntxt --nreduce $nreduce --port 9999 $txt_dir/*.txt"
 WORKER="./target/debug/worker --server=127.0.0.1:9999"
@@ -31,7 +31,7 @@ cd target
 
 mrs_out=$(find ./ -name "mrs-*")
 for mrs in $mrs_out; do
-  mr="mr${mrs:5}"
+  mr=$(echo "$mrs" | sed "s/^mrs\(.*\)$/mr\1/")
   d=`diff $mr $mrs`
   if [ ! -z "$d" ]; then
     echo "diff between '$mr' and '$mrs'"

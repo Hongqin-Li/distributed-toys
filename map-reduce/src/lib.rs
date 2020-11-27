@@ -1,14 +1,21 @@
+#![feature(map_first_last)]
+
 use std::path::PathBuf;
 use std::time::SystemTime;
 use tarpc::serde::{Deserialize, Serialize};
 
 pub mod app;
+mod master;
+mod worker;
+pub use master::Master;
+pub use worker::Worker;
 
 #[tarpc::service]
 pub trait Service {
     async fn request() -> RequestReply;
     async fn report(id: usize, task: TaskType) -> ReportReply;
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum TaskType {
     Map,
