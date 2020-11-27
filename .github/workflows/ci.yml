@@ -8,7 +8,7 @@ on:
       - master
 
 jobs:
-  gh-pages-deploy:
+  ci:
 
     runs-on: ubuntu-latest
 
