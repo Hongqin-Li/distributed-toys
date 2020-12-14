@@ -15,33 +15,17 @@ struct Opt {
     timeout: i32,
 }
 
-fn intermediate_path(map_idx: usize, reduce_idx: usize) -> PathBuf {
-    [
-        "target",
-        format!("mr-{}-{}.json", map_idx, reduce_idx).as_ref(),
-    ]
-    .iter()
-    .collect()
-}
-
-fn output_path(reduce_idx: usize) -> PathBuf {
-    ["target", format!("mr-out-{}", reduce_idx).as_ref()]
-        .iter()
-        .collect()
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     pretty_env_logger::init();
 
     let opt = Opt::from_args();
     let w = Worker {
+        dir: "target".into(),
         server: opt.server,
         timeout: opt.timeout,
         map: wc::map,
         reduce: wc::reduce,
-        intermediate_path,
-        output_path,
     };
     w.launch().await;
     Ok(())

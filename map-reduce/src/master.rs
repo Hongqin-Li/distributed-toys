@@ -85,9 +85,14 @@ impl Service for MapReduceServer {
                     }
                     TaskType::Reduce => None,
                     TaskType::Exit => {
-                        info!("exiting");
-                        process::exit(0);
-                    }
+                        panic!("master exit");
+                        Some(Task {
+                        task: TaskType::Exit,
+                        created_at: SystemTime::now(),
+                        id: 0,
+                        files: vec![],
+                    })
+                },
                 }
             }
         };
