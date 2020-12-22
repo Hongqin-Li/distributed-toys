@@ -6,6 +6,7 @@ mod server;
 
 pub use anyhow;
 pub use async_trait::async_trait;
+pub use log;
 pub use serde;
 pub use serde_json;
 pub use tokio;

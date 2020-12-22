@@ -1,5 +1,6 @@
 [workspace]
 members = [
     "labrpc",
-    "paxos-basic",
+    "paxos",
+    "paxoskv",
 ]

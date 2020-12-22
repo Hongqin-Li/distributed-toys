@@ -1,17 +1,3 @@
-macro_rules! arglist {
-    () => {};
-    (
-        $id:ident; $type:ty
-    ) => {
-        $id: $type
-    };
-    (
-        $id:ident, $($t1:ident),* ; $type:ty, $($t2:ty),*
-    ) => {
-        $id: $type, arg_list!($($t1),* ; $($t2),*)
-    }
-}
-
 #[macro_export]
 macro_rules! service {
     () => {
@@ -35,33 +21,38 @@ macro_rules! service {
             use $crate::serde::{Serialize, Deserialize};
             use $crate::anyhow::{Result, anyhow};
             use $crate::async_trait;
+            use $crate::log::{error, trace};
 
-            mod method {
+
+            #[derive(Debug, Deserialize, Serialize)]
+            pub enum Request {
                 $(
-                    pub mod $method_name {
-                        #[derive(super::super::Deserialize, super::super::Serialize)]
-                        pub struct Argument {
-                            $(pub $arg_id : $arg_ty),*
-                        }
+                    #[allow(non_camel_case_types)]
+                    $method_name {  $($arg_id : $arg_ty),* }
+                ),*
+            }
 
-                        #[derive(super::super::Deserialize, super::super::Serialize)]
-                        pub struct Payload {
-                            pub method: &'static str,
-                            pub arg: Argument,
-                        }
+            mod response {
+                use super::*;
+                $(
+                    #[derive(Deserialize, Serialize)]
+                    #[allow(non_camel_case_types)]
+                    pub struct $method_name {
+                        // TODO: status field
+                        pub data: $output
                     }
                 )*
             }
 
             #[async_trait]
-            pub trait Service: Clone + Send + 'static {
+            pub trait Service: Send + 'static {
                 $(
                     $(#[$method_attr])*
                     async fn $method_name(&mut self, $($arg_id : $arg_ty),* ) -> $output;
                 )*
             }
 
-            #[derive(Clone)]
+            #[derive(Debug, Clone)]
             pub struct Client {
                 tx: Sender<(Sender<String>, String)>,
             }
@@ -70,14 +61,12 @@ macro_rules! service {
 
                 $(
                     pub async fn $method_name(&self, $($arg_id : $arg_ty),* ) -> Result<$output> {
-                    let args = method::$method_name::Payload {
-                        method: stringify!($method_name),
-                        arg: method::$method_name::Argument {
-                            $($arg_id),*
-                        }
+                    let req = Request::$method_name {
+                        $($arg_id),*
                     };
-                    let s = self.call(serde_json::to_string(&args)?).await?;
-                    Ok($crate::serde_json::from_str(&s)?)
+                    let resp = self.call(serde_json::to_string(&req).unwrap()).await?;
+                    let resp: response::$method_name = $crate::serde_json::from_str(&resp)?;
+                    Ok(resp.data)
                 })*
 
                 pub fn with_server(tx: Sender<(Sender<String>, String)>) -> Self {
@@ -86,19 +75,20 @@ macro_rules! service {
                     }
                 }
 
-                async fn call(&self, s: String) -> Result<String> {
+                async fn call(&self, req: String) -> Result<String> {
                     let (tx, mut rx) = mpsc::channel(100);
                     let server_tx = self.tx.clone();
-                    server_tx.send((tx, s)).await?;
-                    if let Some(s) = rx.recv().await {
-                        Ok(s)
+                    server_tx.send((tx, req.clone())).await?;
+                    if let Some(resp) = rx.recv().await {
+                        trace!("req: {}, resp: {}", req, &resp);
+                        Ok(resp)
                     } else {
-                        Err(anyhow!("receive failed"))
+                        Err(anyhow!("unable to receive from server"))
                     }
                 }
             }
 
-
+            #[derive(Debug)]
             pub struct Server<T: Service + Send> {
                 svc: T,
                 pub tx: Sender<(Sender<String>, String)>,
@@ -116,49 +106,33 @@ macro_rules! service {
                 }
                 pub async fn run(&mut self) {
                     loop {
-                        match self.handle1().await {
+                        match self.handle().await {
                             Ok(()) => {
-
                             }
                             Err(e) => {
-
+                                error!("server error: {}", e);
                             }
                         }
                     }
                 }
-                async fn handle1(&mut self) -> Result<()> {
+                async fn handle(&mut self) -> Result<()> {
 
                     match self.rx.recv().await {
                         Some((tx, s)) => {
-                            let v: Value = $crate::serde_json::from_str(&s)?;
-                            if let Some(m) = v.get("method").map(|v| v.as_str()) {
-                                if let Some(m) = m {
-                                    match m {
-                                    $(
-                                        stringify!($method_name) => {
-                                            if let Some(av) = v.get("arg") {
-                                                let arg: method::$method_name::Argument = serde_json::from_value(av.clone())?;
-                                                let ret = self.svc.$method_name (
-                                                    $(arg.$arg_id),*
-                                                ).await;
-                                                let ret = serde_json::to_string(&ret)?;
-                                                tx.send(ret).await?;
-                                                Ok(())
-                                            } else {
-                                                Err(anyhow!("expected arg field"))
-                                            }
-
-                                        }
-                                    )*
-                                    _ => {
-                                        Err(anyhow!("unexpected method name"))
+                            let req: Request = serde_json::from_str(&s)?;
+                            match req {
+                                $(
+                                    Request::$method_name { $($arg_id),* } => {
+                                        let data = self.svc.$method_name($($arg_id),* ).await;
+                                        let resp = response::$method_name {
+                                            data
+                                        };
+                                        let resp = serde_json::to_string(&resp)?;
+                                        trace!("req: {}, resp: {}", &s, &resp);
+                                        tx.send(resp).await?;
+                                        Ok(())
                                     }
-                                }
-                                } else {
-                                    Err(anyhow!("expected string"))
-                                }
-                            } else {
-                                Err(anyhow!("expected method name"))
+                                )*
                             }
                         }
                         None => {Err(anyhow!("expected sender"))}
