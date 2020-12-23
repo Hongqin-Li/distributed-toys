@@ -1,8 +1,7 @@
-use std::{alloc::Layout, path::Path};
+use std::path::Path;
 
 use labrpc::{
     anyhow::Result,
-    log::trace,
     serde::{de::DeserializeOwned, Serialize},
 };
 use rocksdb::DB;
@@ -45,7 +44,7 @@ mod test {
     }
     #[test]
     fn test_all() {
-        let mut p = new_persister();
+        let p = new_persister();
 
         let key = String::from("key1");
         let value = String::from("value1");

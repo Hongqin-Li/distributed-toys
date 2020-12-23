@@ -1,4 +1,19 @@
 #[macro_export]
+macro_rules! random_error {
+    ($prob:tt) => {
+        #[cfg(test)]
+        {
+            use rand::Rng;
+            let mut rng = rand::thread_rng();
+            let x: f32 = rng.gen_range(0.0..1.0);
+            if x < $prob {
+                return Err(anyhow::anyhow!("random error"));
+            }
+        }
+    };
+}
+
+#[macro_export]
 macro_rules! service {
     () => {
         compile_error!("empty service is not allowed");

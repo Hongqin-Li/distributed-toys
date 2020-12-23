@@ -3,7 +3,7 @@ use super::KvService;
 use labrpc::{
     anyhow::Result,
     serde::{Deserialize, Serialize},
-    serde_json, Server,
+    serde_json,
 };
 use paxos::{Acceptor, AcceptorClient, AcceptorServer, Proposer, ProposerService};
 use rocksdb::{WriteBatch, DB};

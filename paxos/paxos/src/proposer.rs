@@ -5,8 +5,7 @@ use labrpc::{
     tokio,
 };
 use rand::Rng;
-use std::sync::{Arc, Mutex};
-use std::{thread, time};
+use std::time;
 
 #[derive(Debug, Clone)]
 pub struct Proposer {
