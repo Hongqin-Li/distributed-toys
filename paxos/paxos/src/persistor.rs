@@ -2,8 +2,8 @@ use std::{alloc::Layout, path::Path};
 
 use labrpc::{
     anyhow::Result,
-    serde::{de::DeserializeOwned, Serialize},
     log::trace,
+    serde::{de::DeserializeOwned, Serialize},
 };
 use rocksdb::DB;
 
@@ -34,7 +34,6 @@ impl Persistor {
     }
 }
 
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -55,5 +54,4 @@ mod test {
         p.set(&key, &value).unwrap();
         assert!(p.get(key).unwrap() == Some(value));
     }
-
 }
