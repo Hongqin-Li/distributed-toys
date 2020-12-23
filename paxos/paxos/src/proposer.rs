@@ -1,5 +1,6 @@
 use crate::{AcceptorClient, ProposerService};
 use labrpc::{
+    anyhow::Result,
     log::{error, trace},
     tokio,
 };
@@ -26,7 +27,7 @@ impl Proposer {
 
 #[labrpc::async_trait]
 impl ProposerService for Proposer {
-    async fn choose(&mut self, key: u64, value: String) -> String {
+    async fn choose(&mut self, key: u64, value: String) -> Result<String> {
         loop {
             self.round += 1;
             let majority = 1 + self.acceptors.len() / 2;
@@ -44,7 +45,7 @@ impl ProposerService for Proposer {
                         }
                     }
                     Err(e) => {
-                        error!("choose error: {}", e);
+                        error!("choose client error: {}", e);
                     }
                 }
             }
@@ -63,7 +64,7 @@ impl ProposerService for Proposer {
                         if (aid == pid) {
                             accepted += 1;
                             if accepted >= majority {
-                                return value;
+                                return Ok(value);
                             }
                         }
                     }

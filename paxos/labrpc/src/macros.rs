@@ -16,6 +16,7 @@ macro_rules! service {
         pub mod $svc_name {
             use super::*;
 
+            use $crate::futures::FutureExt;
             use $crate::tokio::sync::mpsc::{self, Sender, Receiver};
             use $crate::serde_json::{self, Value};
             use $crate::serde::{Serialize, Deserialize};
@@ -48,37 +49,37 @@ macro_rules! service {
             pub trait Service: Send + 'static {
                 $(
                     $(#[$method_attr])*
-                    async fn $method_name(&mut self, $($arg_id : $arg_ty),* ) -> $output;
+                    async fn $method_name(&mut self, $($arg_id : $arg_ty),* ) -> Result<$output>;
                 )*
             }
 
             #[derive(Debug, Clone)]
             pub struct Client {
-                tx: Sender<(Sender<String>, String)>,
+                server_tx: Sender<(Sender<String>, String)>,
             }
 
             impl Client {
 
                 $(
                     pub async fn $method_name(&self, $($arg_id : $arg_ty),* ) -> Result<$output> {
-                    let req = Request::$method_name {
-                        $($arg_id),*
-                    };
-                    let resp = self.call(serde_json::to_string(&req).unwrap()).await?;
-                    let resp: response::$method_name = $crate::serde_json::from_str(&resp)?;
-                    Ok(resp.data)
-                })*
+                        let req = Request::$method_name {
+                            $($arg_id),*
+                        };
+                        let resp = self.call(serde_json::to_string(&req)?).await?;
+                        let resp: response::$method_name = $crate::serde_json::from_str(&resp)?;
+                        Ok(resp.data)
+                    }
+                )*
 
-                pub fn with_server(tx: Sender<(Sender<String>, String)>) -> Self {
+                pub fn from_server<T: Service + Send>(server: &Server<T>) -> Self {
                     Self {
-                        tx
+                        server_tx: server.tx.clone(),
                     }
                 }
 
-                async fn call(&self, req: String) -> Result<String> {
+                pub async fn call(&self, req: String) -> Result<String> {
                     let (tx, mut rx) = mpsc::channel(100);
-                    let server_tx = self.tx.clone();
-                    server_tx.send((tx, req.clone())).await?;
+                    self.server_tx.send((tx, req.clone())).await?;
                     if let Some(resp) = rx.recv().await {
                         trace!("req: {}, resp: {}", req, &resp);
                         Ok(resp)
@@ -99,18 +100,18 @@ macro_rules! service {
                 //     Self { server }
                 // }
 
-                pub fn with_service(svc: T,) -> Self {
+                pub fn from_service(svc: T) -> Self {
                     let (tx, rx) = mpsc::channel(100);
-
-                    Self {svc, tx, rx }
+                    Self {svc, tx, rx}
                 }
+
                 pub async fn run(&mut self) {
                     loop {
                         match self.handle().await {
                             Ok(()) => {
                             }
                             Err(e) => {
-                                error!("server error: {}", e);
+                                error!("server error: {:#?}", e);
                             }
                         }
                     }
@@ -119,16 +120,19 @@ macro_rules! service {
 
                     match self.rx.recv().await {
                         Some((tx, s)) => {
+                            trace!("handle recv: {}", &s);
                             let req: Request = serde_json::from_str(&s)?;
                             match req {
                                 $(
                                     Request::$method_name { $($arg_id),* } => {
-                                        let data = self.svc.$method_name($($arg_id),* ).await;
+                                        trace!("handle call svc start");
+                                        let data = self.svc.$method_name($($arg_id),* ).await?;
+                                        trace!("handle call svc end");
                                         let resp = response::$method_name {
                                             data
                                         };
                                         let resp = serde_json::to_string(&resp)?;
-                                        trace!("req: {}, resp: {}", &s, &resp);
+                                        trace!("handle send: {}", &resp);
                                         tx.send(resp).await?;
                                         Ok(())
                                     }

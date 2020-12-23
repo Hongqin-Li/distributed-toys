@@ -1,3 +1,6 @@
+#![feature(async_closure)]
+
+use futures::future::{AbortHandle, Abortable, Aborted};
 use labrpc::{
     log::{error, info, trace},
     tokio,
@@ -33,13 +36,16 @@ async fn test_single_key() {
 
     // Spawn acceptors
     for i in 0..N {
-        let p = dir.path().join(format!("acc-{}", i));
-        let mut acc_server = AcceptorServer::with_service(Acceptor::new(p));
-        acceptor_clients.push(AcceptorClient::with_server(acc_server.tx.clone()));
+        let acc_id = format!("acc-{}", i);
+
+        let p = dir.path().join(&acc_id);
+        let mut acc_server = AcceptorServer::from_service(Acceptor::new(p));
+        let acc_client = AcceptorClient::from_server(&acc_server);
 
         acceptors.push(tokio::spawn(async move {
             acc_server.run().await;
         }));
+        acceptor_clients.push(acc_client);
     }
 
     let (tx, mut rx) = mpsc::channel(usize::try_from(2 * N).unwrap());
@@ -56,9 +62,9 @@ async fn test_single_key() {
         }));
     }
 
-    let mut s = None;
+    let mut s: Option<String> = None;
     for i in 0..NPROP {
-        let t = rx.recv().await.unwrap();
+        let t = rx.recv().await.unwrap().unwrap();
         if let Some(s) = s.clone() {
             assert_eq!(s, t);
         } else {
