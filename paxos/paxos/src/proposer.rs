@@ -7,6 +7,7 @@ use labrpc::{
 use rand::Rng;
 use std::time;
 
+/// Proposer that chooses values by commuicating to acceptors.
 #[derive(Debug, Clone)]
 pub struct Proposer {
     acceptors: Vec<AcceptorClient>,
@@ -15,6 +16,7 @@ pub struct Proposer {
 }
 
 impl Proposer {
+    /// Create a proposer with per-proposer id and a cluster of acceptor clients.
     pub fn new(id: u32, acceptors: Vec<AcceptorClient>) -> Self {
         Self {
             id,

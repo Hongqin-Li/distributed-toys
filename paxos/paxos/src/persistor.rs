@@ -6,16 +6,20 @@ use labrpc::{
 };
 use rocksdb::DB;
 
+/// A wrapper of RocksDB which provides set, get, remove operations
+/// for type that derive [Serialize](serde::Serialize) and [Deserialize](serde::Deserialize)
 pub struct Persistor {
     db: DB,
 }
 
 impl Persistor {
+    /// Create a new persistor with given path to a file.
     pub fn new<P: AsRef<Path>>(path: P) -> Self {
         Self {
             db: DB::open_default(path).unwrap(),
         }
     }
+    /// Get a value by given key.
     pub fn get<K, T>(&self, key: K) -> Result<Option<T>>
     where
         K: AsRef<[u8]>,
@@ -28,6 +32,7 @@ impl Persistor {
             Ok(None)
         }
     }
+    /// Set value associated to given key.
     pub fn set<K: AsRef<[u8]>, T: Serialize>(&self, key: K, value: &T) -> Result<()> {
         Ok(self.db.put(key, bincode::serialize(value)?)?)
     }

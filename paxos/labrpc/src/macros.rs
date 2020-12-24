@@ -3,11 +3,11 @@ macro_rules! random_error {
     ($prob:tt) => {
         #[cfg(test)]
         {
-            use rand::Rng;
-            let mut rng = rand::thread_rng();
+            use $crate::rand::Rng;
+            let mut rng = $crate::rand::thread_rng();
             let x: f32 = rng.gen_range(0.0..1.0);
             if x < $prob {
-                return Err(anyhow::anyhow!("random error"));
+                return Err($crate::anyhow::anyhow!("random error"));
             }
         }
     };
@@ -27,11 +27,14 @@ macro_rules! service {
             )*
         }
     ) => {
+        #[allow(missing_docs)]
         $(#[$service_attr])*
         pub mod $svc_name {
             use super::*;
 
-            use $crate::futures::FutureExt;
+            use $crate::network::{Network, NetworkPackage};
+            use $crate::{server, client};
+
             use $crate::tokio::sync::mpsc::{self, Sender, Receiver};
             use $crate::serde_json::{self, Value};
             use $crate::serde::{Serialize, Deserialize};
@@ -70,7 +73,8 @@ macro_rules! service {
 
             #[derive(Debug, Clone)]
             pub struct Client {
-                server_tx: Sender<(Sender<String>, String)>,
+                server_id: String,
+                tx: Sender<NetworkPackage>,
             }
 
             impl Client {
@@ -86,15 +90,9 @@ macro_rules! service {
                     }
                 )*
 
-                pub fn from_server<T: Service + Send>(server: &Server<T>) -> Self {
-                    Self {
-                        server_tx: server.tx.clone(),
-                    }
-                }
-
                 pub async fn call(&self, req: String) -> Result<String> {
                     let (tx, mut rx) = mpsc::channel(100);
-                    self.server_tx.send((tx, req.clone())).await?;
+                    self.tx.send(NetworkPackage{to: self.server_id.clone(), reply: tx, data: req.clone()}).await?;
                     if let Some(resp) = rx.recv().await {
                         trace!("req: {}, resp: {}", req, &resp);
                         Ok(resp)
@@ -104,51 +102,51 @@ macro_rules! service {
                 }
             }
 
+            impl client::Client for Client {
+                fn from_server(server_id: String, net_tx: Sender<NetworkPackage>) -> Self {
+                    Self {
+                        server_id,
+                        tx: net_tx,
+                    }
+                }
+            }
+
             #[derive(Debug)]
             pub struct Server<T: Service + Send> {
                 svc: T,
-                pub tx: Sender<(Sender<String>, String)>,
-                rx: Receiver<(Sender<String>, String)>,
+                tx: Sender<NetworkPackage>,
+                rx: Receiver<NetworkPackage>,
             }
-            impl<T: Service + Send> Server<T> {
-                // pub fn new(server: $crate::Server) -> Self {
-                //     Self { server }
-                // }
 
-                pub fn from_service(svc: T) -> Self {
+            #[async_trait]
+            impl<T: Service + Send> server::Server for Server<T> {
+                type Service = T;
+
+                fn from_service(svc: Self::Service) -> Self {
                     let (tx, rx) = mpsc::channel(100);
                     Self {svc, tx, rx}
                 }
 
-                pub async fn run(&mut self) {
-                    loop {
-                        match self.handle().await {
-                            Ok(()) => {
-                            }
-                            Err(e) => {
-                                error!("server error: {:#?}", e);
-                            }
-                        }
-                    }
+                fn client_chan(&self) -> Sender<NetworkPackage> {
+                    return self.tx.clone();
                 }
+
                 async fn handle(&mut self) -> Result<()> {
 
                     match self.rx.recv().await {
-                        Some((tx, s)) => {
-                            trace!("handle recv: {}", &s);
-                            let req: Request = serde_json::from_str(&s)?;
+                        Some(NetworkPackage{to, reply, data}) => {
+                            trace!("handle recv: {}", &data);
+                            let req: Request = serde_json::from_str(&data)?;
                             match req {
                                 $(
                                     Request::$method_name { $($arg_id),* } => {
-                                        trace!("handle call svc start");
                                         let data = self.svc.$method_name($($arg_id),* ).await?;
-                                        trace!("handle call svc end");
                                         let resp = response::$method_name {
                                             data
                                         };
                                         let resp = serde_json::to_string(&resp)?;
                                         trace!("handle send: {}", &resp);
-                                        tx.send(resp).await?;
+                                        reply.send(resp).await?;
                                         Ok(())
                                     }
                                 )*

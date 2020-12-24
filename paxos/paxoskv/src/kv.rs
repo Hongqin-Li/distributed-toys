@@ -2,6 +2,7 @@ use super::KvService;
 
 use labrpc::{
     anyhow::Result,
+    random_error,
     serde::{Deserialize, Serialize},
     serde_json,
 };
@@ -32,17 +33,15 @@ enum Operation {
     Remove { key: String },
 }
 
+#[derive(Clone)]
 pub struct ClusterInfo {
     pub acc_clients: Vec<AcceptorClient>,
 }
 
 impl Paxoskv {
-    fn new(dir: impl Into<PathBuf>, id: u32, cluster: ClusterInfo) -> Self {
-        let dir: PathBuf = dir.into();
-        let db_path = dir.join("paxoskv");
-
+    pub fn new(path: impl AsRef<Path>, id: u32, cluster: ClusterInfo) -> Self {
         let proposer = Proposer::new(id, cluster.acc_clients);
-        let db = DB::open_default(db_path).unwrap();
+        let db = DB::open_default(path).unwrap();
         let term = db
             .get("term")
             .unwrap()
@@ -66,7 +65,9 @@ impl KvService for Paxoskv {
             Ok(None)
         }
     }
-    async fn get(&mut self, key: String) -> Result<Option<String>> {
+    async fn get(&mut self, mut key: String) -> Result<Option<String>> {
+        key = key + "-"; // Keys not end with '-' are used internally.
+
         let ent = LogEntry {
             pid: self.id,
             op: Operation::Get { key: key.clone() },
@@ -91,7 +92,15 @@ impl KvService for Paxoskv {
             }
         }
     }
-    async fn set(&mut self, key: String, value: String) -> Result<Option<String>> {
+    /// `command_id` is used for eliminating duplication when client retries.
+    async fn set(&mut self, cmd_id: u64, mut key: String, value: String) -> Result<()> {
+        let cmd_key = format!("{}-command", cmd_id);
+        if self.db.get(&cmd_key)?.is_some() {
+            return Ok(())
+        }
+
+        key = key + "-";
+
         let ent = LogEntry {
             pid: self.id,
             op: Operation::Set {
@@ -99,6 +108,7 @@ impl KvService for Paxoskv {
                 value: value.clone(),
             },
         };
+        
         loop {
             self.term += 1;
 
@@ -114,12 +124,20 @@ impl KvService for Paxoskv {
                     let mut batch = WriteBatch::default();
                     batch.put(&key, &value);
                     batch.put("term", bincode::serialize(&self.term)?);
+                    batch.put(&cmd_key, "x");
                     self.db.write(batch)?;
+                    return Ok(());
                 }
             }
         }
     }
-    async fn remove(&mut self, key: String) -> Result<Option<String>> {
+    async fn remove(&mut self, cmd_id: u64, mut key: String) -> Result<()> {
+        let cmd_key = format!("{}-command", cmd_id);
+        if self.db.get(&cmd_key)?.is_some() {
+            return Ok(())
+        }
+
+        key = key + "-";
         let ent = LogEntry {
             pid: self.id,
             op: Operation::Remove { key: key.clone() },
@@ -139,9 +157,28 @@ impl KvService for Paxoskv {
                     let mut batch = WriteBatch::default();
                     batch.delete(&key);
                     batch.put("term", bincode::serialize(&self.term)?);
+                    batch.put(&cmd_key, "x");
                     self.db.write(batch)?;
+                    return Ok(())
                 }
             }
         }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use std::vec;
+
+    use super::*;
+    use tempfile::TempDir;
+
+
+    #[test]
+    fn test_new() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("tmp");
+        let kv = Paxoskv::new(path, 1, ClusterInfo {acc_clients: Vec::new()});
     }
 }

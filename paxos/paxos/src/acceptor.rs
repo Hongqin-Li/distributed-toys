@@ -3,13 +3,17 @@ use std::path::Path;
 use super::AcceptorService;
 use crate::Persistor;
 use crate::Proposal;
-use labrpc::{anyhow, anyhow::Result, random_error};
+use labrpc::{anyhow::Result, random_error};
 
+/// A stateless acceptor
 pub struct Acceptor {
     persistor: Persistor,
 }
 
 impl Acceptor {
+    /// Create an acceptor from a given path.
+    ///
+    /// The path is used to store and retrieve persistent states.
     pub fn new<P: AsRef<Path>>(path: P) -> Self {
         Self {
             persistor: Persistor::new(path),
@@ -17,6 +21,8 @@ impl Acceptor {
     }
 }
 
+/// It is stateless (everything goes to persistor).
+/// Thus, we can simply test it by returning Error.
 #[labrpc::async_trait]
 impl AcceptorService for Acceptor {
     async fn prepare(&mut self, key: u64, pid: u64) -> Result<Option<Proposal>> {

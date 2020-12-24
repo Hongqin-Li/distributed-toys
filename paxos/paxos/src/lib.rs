@@ -1,5 +1,12 @@
+#![deny(missing_docs)]
+#![deny(clippy::all)]
+//! A basic paxos library.
+
 use serde::{Deserialize, Serialize};
 
+/// Proposal with id and value.
+///
+/// id is unique for different round of differnt proposer.
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Proposal {
     id: u64,
@@ -36,19 +43,17 @@ pub use persistor::Persistor;
 pub use proposer::Proposer;
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
 
-    use super::*;
+    use crate::{Acceptor, AcceptorClient, AcceptorServer, Proposer, ProposerService};
 
-    use futures::future::{AbortHandle, Abortable, Aborted};
-    use labrpc::{
-        log::{error, info, trace},
-        tokio,
-        tokio::sync::mpsc,
-    };
+    use labrpc::{log::info, tokio, tokio::sync::mpsc, Network};
     use rand::distributions::Alphanumeric;
     use rand::Rng;
     use std::convert::TryFrom;
+    use std::sync::{Arc, Mutex};
+    use tempfile::TempDir;
+    use tokio::task::JoinHandle;
 
     fn random_string(n: usize) -> String {
         let v = rand::thread_rng()
@@ -56,6 +61,36 @@ mod tests {
             .take(n)
             .collect::<Vec<u8>>();
         String::from_utf8(v).expect("found invalid UTF-8")
+    }
+
+    pub fn acceptor_cluster(
+        dir: &TempDir,
+        n: u32,
+    ) -> (Vec<AcceptorClient>, Vec<JoinHandle<()>>, JoinHandle<()>) {
+        let mut net = Network::new();
+
+        let mut acceptor_clients = Vec::new();
+
+        let mut acceptors = Vec::new();
+
+        // Spawn acceptors
+        for i in 0..n {
+            let id = format!("acc-{}", i);
+
+            let p = dir.path().join(&id);
+
+            let (client, server_routine) = net
+                .register_service::<AcceptorServer<Acceptor>, _, _, _>(id, move || {
+                    Acceptor::new(p.clone())
+                });
+            acceptor_clients.push(client);
+            acceptors.push(tokio::spawn(server_routine));
+        }
+
+        let net_thread = tokio::spawn(async move {
+            net.run().await;
+        });
+        (acceptor_clients, acceptors, net_thread)
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 20)]
@@ -67,33 +102,18 @@ mod tests {
         env_logger::init();
         let dir = tempfile::TempDir::new().unwrap();
 
-        let mut acceptor_clients = Vec::new();
-
-        let mut acceptors = Vec::new();
         let mut proposers = Vec::new();
 
-        // Spawn acceptors
-        for i in 0..N {
-            let acc_id = format!("acc-{}", i);
-
-            let p = dir.path().join(&acc_id);
-            let mut acc_server = AcceptorServer::from_service(Acceptor::new(p));
-            let acc_client = AcceptorClient::from_server(&acc_server);
-
-            acceptors.push(tokio::spawn(async move {
-                acc_server.run().await;
-            }));
-            acceptor_clients.push(acc_client);
-        }
+        let (acc_clients, acceptors, net_thread) = acceptor_cluster(&dir, N);
 
         let (tx, mut rx) = mpsc::channel(usize::try_from(2 * N).unwrap());
 
         // Spawn proposers
         for i in 0..NPROP {
-            let acceptor_clients = acceptor_clients.clone();
+            let acc_clients = acc_clients.clone();
             let tx = tx.clone();
             proposers.push(tokio::spawn(async move {
-                let mut p = Proposer::new(i, acceptor_clients);
+                let mut p = Proposer::new(i, acc_clients);
                 let k = format!("p[{}]={}", i, random_string(10));
                 let s = p.choose(KEY, dbg!(k)).await;
                 tx.send(s).await.unwrap();
@@ -101,7 +121,7 @@ mod tests {
         }
 
         let mut s: Option<String> = None;
-        for i in 0..NPROP {
+        for _ in 0..NPROP {
             let t = rx.recv().await.unwrap().unwrap();
             if let Some(s) = s.clone() {
                 assert_eq!(s, t);

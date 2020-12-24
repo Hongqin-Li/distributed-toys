@@ -3,8 +3,10 @@ labrpc::service! {
         fn say(a: i32, x: String) -> String;
     }
 }
+
 use hello::{Client, Server, Service};
 use labrpc::anyhow::Result;
+
 #[derive(Clone)]
 struct MyService {}
 
