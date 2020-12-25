@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "labrpc",
+    "map-reduce",
+    "paxos",
+    "paxoskv",
+]

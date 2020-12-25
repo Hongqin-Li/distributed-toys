@@ -25,4 +25,7 @@ jobs:
         cd map-reduce
         sh test.sh
         cd ..
+        
+    - name: Test Rust
+      run: cargo test
 
