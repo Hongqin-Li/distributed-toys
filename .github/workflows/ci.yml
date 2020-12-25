@@ -22,9 +22,7 @@ jobs:
 
     - name: Test MapReduce
       run: |
-        cd map-reduce
-        sh test.sh
-        cd ..
+        sh map-reduce/test.sh
         
     - name: Test Rust
       run: cargo test

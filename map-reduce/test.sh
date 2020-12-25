@@ -2,7 +2,7 @@ set -o errexit
 
 nworkers=10
 
-txt_dir=../MIT-6.824/src/main
+txt_dir=./MIT-6.824/src/main
 ntxt=$(find $txt_dir -name "*.txt" | wc -l)
 nreduce=20
 
