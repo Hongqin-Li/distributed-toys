@@ -39,11 +39,11 @@ impl AcceptorService for Acceptor {
             },
         );
         if let Some(pid) = newer {
-            random_error!(0.1);
+            random_error!(0.05);
             self.persistor.set(&key_pid, &pid)?;
         };
 
-        random_error!(0.1);
+        random_error!(0.05);
         Ok(self.persistor.get(&key_accepted)?)
     }
     async fn accept(&mut self, key: u64, pid: u64, value: String) -> Result<u64> {
@@ -52,14 +52,14 @@ impl AcceptorService for Acceptor {
         if pid == prev_pid {
             let key_accepted = format!("{}:accepted", key);
 
-            random_error!(0.1);
+            random_error!(0.05);
 
             self.persistor
                 .set(&key_accepted, &Proposal { id: pid, value })?;
         } else if pid > prev_pid {
             panic!("Unexpected request without prepraration.");
         }
-        random_error!(0.1);
+        random_error!(0.05);
 
         Ok(prev_pid)
     }

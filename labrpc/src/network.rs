@@ -66,12 +66,12 @@ impl Network {
                 .recv()
                 .await
                 .expect("sender cannot be dropped by itself");
-            let nodes = {
+            let node = {
                 let x = self.nodes.lock().unwrap();
                 x.get(&p.to).map(|x| x.clone())
             };
 
-            if let Some(x) = nodes {
+            if let Some(x) = node {
                 if x.send(p).await.is_err() {
                     warn!("send to node failed, dropped");
                 }

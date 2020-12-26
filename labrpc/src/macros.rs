@@ -1,12 +1,13 @@
 #[macro_export]
 macro_rules! random_error {
     ($prob:tt) => {
-        #[cfg(test)]
+        #[cfg(debug_assertions)]
         {
             use $crate::rand::Rng;
             let mut rng = $crate::rand::thread_rng();
             let x: f32 = rng.gen_range(0.0..1.0);
             if x < $prob {
+                $crate::log::error!("random error");
                 return Err($crate::anyhow::anyhow!("random error"));
             }
         }
